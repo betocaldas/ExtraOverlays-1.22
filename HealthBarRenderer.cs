@@ -72,9 +72,9 @@ namespace ExtraOverlays
             shader.Uniform("noTexture", 1f);
 
             var aboveHeadPos = new Vec3d(
-                ForEntity.Pos.X,
-                ForEntity.Pos.Y + ForEntity.CollisionBox.Y2,
-                ForEntity.Pos.Z);
+                ForEntity.SidedPos.X,
+                ForEntity.SidedPos.Y + ForEntity.CollisionBox.Y2,
+                ForEntity.SidedPos.Z);
 
             double offX = ForEntity.CollisionBox.X2 - ForEntity.OriginCollisionBox.X2;
             double offZ = ForEntity.CollisionBox.Z2 - ForEntity.OriginCollisionBox.Z2;

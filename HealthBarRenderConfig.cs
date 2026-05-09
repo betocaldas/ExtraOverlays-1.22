@@ -1,8 +1,5 @@
-using CommonLib.Config;
-
 namespace ExtraOverlays
 {
-    [Config("extraoverlays.json")]
     public class HealthBarRenderConfig
     {
         public float FadeIn { get; set; } = 0.2f;

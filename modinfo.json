@@ -1,0 +1,13 @@
+{
+    "type": "code",
+    "modid": "extraoverlaysm4",
+    "name": "Extra Overlays",
+    "version": "1.7.1",
+    "authors": ["Mintir4"],
+    "description": "Adds a health bar for mobs",
+    "website": "https://github.com/betocaldas/ExtraOverlays-1.22",
+    "side": "Client",
+    "dependencies": {
+        "game": "1.22.2"
+    }
+}

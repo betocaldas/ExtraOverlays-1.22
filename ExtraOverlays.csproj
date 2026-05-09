@@ -22,10 +22,6 @@
 			<HintPath>$(APPDATA)\Vintagestory\VintagestoryAPI.dll</HintPath>
 			<Private>false</Private>
 		</Reference>
-		<Reference Include="CommonLib">
-			<HintPath>$(MSBuildProjectDirectory)\lib\CommonLib.dll</HintPath>
-			<Private>false</Private>
-		</Reference>
 	</ItemGroup>
 
 	<PropertyGroup>

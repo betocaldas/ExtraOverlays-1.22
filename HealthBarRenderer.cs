@@ -11,10 +11,14 @@ namespace ExtraOverlays
         private readonly ICoreClientAPI _api;
         private readonly HealthBarRenderConfig _config;
         private readonly Matrixf _mvMatrix = new();
-        private readonly MeshRef? _healthBarRef;
-        private readonly MeshRef? _backRef;
+        private readonly MeshRef _healthBarRef;
+        private readonly MeshRef _backRef;
+        private readonly int _highHPColorInt;
+        private readonly int _midHPColorInt;
+        private readonly int _lowHPColorInt;
         private Vec4f _color = new();
         private float _alpha = 0f;
+        private bool _disposed;
 
         public Entity? ForEntity { get; set; }
         public bool Active { get; set; }
@@ -27,6 +31,10 @@ namespace ExtraOverlays
             _api = api;
             _config = config;
 
+            _highHPColorInt = ParseHexOrDefault(config.HighHPColor, "#7FBF7F");
+            _midHPColorInt = ParseHexOrDefault(config.MidHPColor, "#BFBF7F");
+            _lowHPColorInt = ParseHexOrDefault(config.LowHPColor, "#BF7F7F");
+
             MeshData backData = LineMeshUtil.GetRectangle(ColorUtil.WhiteArgb);
             _backRef = _api.Render.UploadMesh(backData);
             _healthBarRef = _api.Render.UploadMesh(QuadMeshUtil.GetQuad());
@@ -34,37 +42,41 @@ namespace ExtraOverlays
             _api.Event.RegisterRenderer(this, EnumRenderStage.Ortho);
         }
 
+        private int ParseHexOrDefault(string hex, string fallback)
+        {
+            try
+            {
+                return ColorUtil.Hex2Int(hex);
+            }
+            catch (Exception)
+            {
+                _api.Logger.Warning("[extraoverlaysm4] Invalid hex color '{0}' in extraoverlays.json; using default '{1}'.", hex, fallback);
+                return ColorUtil.Hex2Int(fallback);
+            }
+        }
+
         public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
         {
-            // no entity
-            if (ForEntity == null)
-            {
-                return;
-            }
+            if (ForEntity == null) return;
+            if (!ForEntity.WatchedAttributes.HasAttribute("health")) return;
+            if (_alpha <= 0 && !Active) return;
 
-            // no health
-            if (!ForEntity.WatchedAttributes.HasAttribute("health"))
-            {
-                return;
-            }
+            ITreeAttribute? healthTree = ForEntity.WatchedAttributes.GetTreeAttribute("health");
+            if (healthTree == null) return;
 
-            // invisible
-            if (_alpha <= 0 && !Active)
-            {
-                return;
-            }
-
-            ITreeAttribute healthTree = ForEntity.WatchedAttributes.GetTreeAttribute("health");
             float currentHealth = healthTree.GetFloat("currenthealth");
             float maxHealth = healthTree.GetFloat("maxhealth");
+            if (maxHealth <= 0) return;
             float progress = currentHealth / maxHealth;
 
             float deltaAlpha = deltaTime / (Active ? _config.FadeIn : -_config.FadeOut);
-            _alpha = Math.Max(0f, Math.Min(1f, _alpha + deltaAlpha));
+            _alpha = Math.Clamp(_alpha + deltaAlpha, 0f, 1f);
 
             GetHealthBarColor(progress, ref _color);
 
             IShaderProgram shader = _api.Render.CurrentActiveShader;
+            if (shader == null) return;
+
             shader.Uniform("rgbaIn", _color);
             shader.Uniform("extraGlow", 0);
             shader.Uniform("applyColor", 0);
@@ -72,9 +84,9 @@ namespace ExtraOverlays
             shader.Uniform("noTexture", 1f);
 
             var aboveHeadPos = new Vec3d(
-                ForEntity.SidedPos.X,
-                ForEntity.SidedPos.Y + ForEntity.CollisionBox.Y2,
-                ForEntity.SidedPos.Z);
+                ForEntity.Pos.X,
+                ForEntity.Pos.Y + ForEntity.CollisionBox.Y2,
+                ForEntity.Pos.Z);
 
             double offX = ForEntity.CollisionBox.X2 - ForEntity.OriginCollisionBox.X2;
             double offZ = ForEntity.CollisionBox.Z2 - ForEntity.OriginCollisionBox.Z2;
@@ -87,10 +99,7 @@ namespace ExtraOverlays
                 _api.Render.FrameHeight);
 
             // Z negative seems to indicate that the name tag is behind us \o/
-            if (pos.Z < 0)
-            {
-                return;
-            }
+            if (pos.Z < 0) return;
 
             float scale = 4f / Math.Max(1, (float)pos.Z);
 
@@ -117,7 +126,6 @@ namespace ExtraOverlays
 
             _api.Render.RenderMesh(_backRef);
 
-
             // Render health bar
             _mvMatrix
                 .Set(_api.Render.CurrentModelviewMatrix)
@@ -134,28 +142,25 @@ namespace ExtraOverlays
 
         private void GetHealthBarColor(float progress, ref Vec4f color)
         {
-            HexToVec(_config.HighHPColor, ref color);
+            int chosen = _highHPColorInt;
 
             if (progress <= _config.LowHPThreshold)
             {
-                HexToVec(_config.LowHPColor, ref color);
+                chosen = _lowHPColorInt;
             }
             else if (progress <= _config.MidHPThreshold)
             {
-                HexToVec(_config.MidHPColor, ref color);
+                chosen = _midHPColorInt;
             }
 
+            ColorUtil.ToRGBAVec4f(chosen, ref color);
             color.A = _alpha;
-        }
-
-        private static void HexToVec(string hexColor, ref Vec4f color)
-        {
-            int intColor = ColorUtil.Hex2Int(hexColor);
-            ColorUtil.ToRGBAVec4f(intColor, ref color);
         }
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
             GC.SuppressFinalize(this);
             _api.Render.DeleteMesh(_backRef);
             _api.Render.DeleteMesh(_healthBarRef);

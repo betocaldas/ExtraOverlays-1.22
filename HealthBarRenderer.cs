@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using Vintagestory.API.Client;
+using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.MathTools;
@@ -17,8 +19,12 @@ namespace ExtraOverlays
         private float _alpha = 0f;
         private string _lastRenderState = "init";
         private long _nextRenderSampleMs;
+        private readonly List<(Entity Entity, double DistSq)> _nearbyEntities = new();
+        private const int MaxVisibleEntities = 15;
+        private const double MaxDistanceBlocks = 10;
+        private const double MaxDistanceSq = MaxDistanceBlocks * MaxDistanceBlocks;
+        private long _nextDiagnosticLogMs;
 
-        public Entity? ForEntity { get; set; }
         public bool Active { get; set; }
 
         public double RenderOrder => 0.41; // After Entity 0.4
@@ -38,40 +44,83 @@ namespace ExtraOverlays
 
         public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
         {
-            // no entity
-            if (ForEntity == null)
+            if (!Active)
             {
-                UpdateRenderState("no-entity");
+                UpdateRenderState("inactive");
                 return;
             }
 
-            // no health
-            if (!ForEntity.WatchedAttributes.HasAttribute("health"))
+            Entity? playerEntity = _api.World.Player?.Entity;
+            if (playerEntity == null)
             {
-                UpdateRenderState($"no-health:{ForEntity.Code}");
+                UpdateRenderState("no-player");
                 return;
             }
 
-            // invisible
-            if (_alpha <= 0 && !Active)
+            _nearbyEntities.Clear();
+            int scannedEntities = 0;
+            int healthEntities = 0;
+            _api.World.GetEntitiesAround(
+                new Vec3d(playerEntity.Pos.X, playerEntity.Pos.Y, playerEntity.Pos.Z),
+                (float)MaxDistanceBlocks,
+                (float)MaxDistanceBlocks,
+                entity =>
+                {
+                    scannedEntities++;
+                    if (entity.EntityId == playerEntity.EntityId) return false;
+                    if (!entity.WatchedAttributes.HasAttribute("health")) return false;
+
+                    healthEntities++;
+                    double dx = entity.Pos.X - playerEntity.Pos.X;
+                    double dy = entity.Pos.Y - playerEntity.Pos.Y;
+                    double dz = entity.Pos.Z - playerEntity.Pos.Z;
+                    double distSq = dx * dx + dy * dy + dz * dz;
+                    if (distSq > MaxDistanceSq) return false;
+
+                    _nearbyEntities.Add((entity, distSq));
+                    return false;
+                });
+
+            if (scannedEntities == 0)
             {
-                UpdateRenderState("hidden-alpha");
+                UpdateRenderState("no-entities-in-range-query");
+                MaybeLogDiagnostics(scannedEntities, healthEntities, 0);
                 return;
             }
 
-            ITreeAttribute healthTree = ForEntity.WatchedAttributes.GetTreeAttribute("health");
+            if (_nearbyEntities.Count == 0)
+            {
+                UpdateRenderState("no-nearby-health-entities");
+                MaybeLogDiagnostics(scannedEntities, healthEntities, 0);
+                return;
+            }
+
+            _nearbyEntities.Sort((left, right) => left.DistSq.CompareTo(right.DistSq));
+
+            float deltaAlpha = deltaTime / (Active ? _config.FadeIn : -_config.FadeOut);
+            _alpha = Math.Max(0f, Math.Min(1f, _alpha + deltaAlpha));
+            int renderCount = Math.Min(MaxVisibleEntities, _nearbyEntities.Count);
+
+            for (int i = 0; i < renderCount; i++)
+            {
+                RenderHealthBar(_nearbyEntities[i].Entity);
+            }
+
+            UpdateRenderState($"rendering-multi:count={renderCount}");
+            MaybeLogDiagnostics(scannedEntities, healthEntities, renderCount);
+        }
+
+        private void RenderHealthBar(Entity entity)
+        {
+            ITreeAttribute healthTree = entity.WatchedAttributes.GetTreeAttribute("health");
             float currentHealth = healthTree.GetFloat("currenthealth");
             float maxHealth = healthTree.GetFloat("maxhealth");
             if (maxHealth <= 0)
             {
-                UpdateRenderState($"invalid-health:{ForEntity.Code}:max={maxHealth}");
                 return;
             }
 
             float progress = currentHealth / maxHealth;
-
-            float deltaAlpha = deltaTime / (Active ? _config.FadeIn : -_config.FadeOut);
-            _alpha = Math.Max(0f, Math.Min(1f, _alpha + deltaAlpha));
 
             GetHealthBarColor(progress, ref _color);
 
@@ -83,12 +132,12 @@ namespace ExtraOverlays
             shader.Uniform("noTexture", 1f);
 
             var aboveHeadPos = new Vec3d(
-                ForEntity.SidedPos.X,
-                ForEntity.SidedPos.Y + ForEntity.CollisionBox.Y2,
-                ForEntity.SidedPos.Z);
+                entity.SidedPos.X,
+                entity.SidedPos.Y + entity.CollisionBox.Y2,
+                entity.SidedPos.Z);
 
-            double offX = ForEntity.CollisionBox.X2 - ForEntity.OriginCollisionBox.X2;
-            double offZ = ForEntity.CollisionBox.Z2 - ForEntity.OriginCollisionBox.Z2;
+            double offX = entity.CollisionBox.X2 - entity.OriginCollisionBox.X2;
+            double offZ = entity.CollisionBox.Z2 - entity.OriginCollisionBox.Z2;
             aboveHeadPos.Add(offX, 0, offZ);
 
             Vec3d pos = MatrixToolsd.Project(aboveHeadPos,
@@ -100,7 +149,6 @@ namespace ExtraOverlays
             // Z negative seems to indicate that the name tag is behind us \o/
             if (pos.Z < 0)
             {
-                UpdateRenderState("behind-camera");
                 return;
             }
 
@@ -142,7 +190,6 @@ namespace ExtraOverlays
             shader.UniformMatrix("modelViewMatrix", _mvMatrix.Values);
 
             _api.Render.RenderMesh(_healthBarRef);
-            UpdateRenderState($"rendering:{ForEntity.Code}:hp={currentHealth}/{maxHealth}:alpha={_alpha:0.00}");
         }
 
         private void GetHealthBarColor(float progress, ref Vec4f color)
@@ -190,6 +237,18 @@ namespace ExtraOverlays
                 _api.Logger.VerboseDebug($"[extraoverlaysm4] Render state sample: {nextState}");
                 _nextRenderSampleMs = _api.ElapsedMilliseconds + 10000;
             }
+        }
+
+        private void MaybeLogDiagnostics(int scannedEntities, int healthEntities, int renderedEntities)
+        {
+            if (_api.ElapsedMilliseconds < _nextDiagnosticLogMs)
+            {
+                return;
+            }
+
+            _api.Logger.Notification(
+                $"[extraoverlaysm4] Diagnostics range={MaxDistanceBlocks} scanned={scannedEntities} withHealth={healthEntities} renderable={_nearbyEntities.Count} rendered={renderedEntities}");
+            _nextDiagnosticLogMs = _api.ElapsedMilliseconds + 5000;
         }
     }
 }

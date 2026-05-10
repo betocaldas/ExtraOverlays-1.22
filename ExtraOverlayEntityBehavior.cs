@@ -10,7 +10,6 @@ namespace ExtraOverlays
     {
         private readonly ICoreClientAPI _api;
         private readonly HealthBarRenderer _healthBarRenderer;
-        private long _lastSelectedEntityId = -1;
 
         public ExtraOverlayEntityBehavior(Entity entity) : base(entity)
         {
@@ -112,28 +111,7 @@ namespace ExtraOverlays
 
         public override void OnGameTick(float dt)
         {
-            var selectedEntity = _api.World.Player.CurrentEntitySelection?.Entity;
-            if (selectedEntity == null)
-            {
-                _healthBarRenderer.Active = false;
-                if (_lastSelectedEntityId != -1)
-                {
-                    _api.Logger.VerboseDebug("[extraoverlaysm4] Selection cleared");
-                    _lastSelectedEntityId = -1;
-                }
-            }
-            else
-            {
-                _healthBarRenderer.ForEntity = selectedEntity;
-                _healthBarRenderer.Active = true;
-                if (_lastSelectedEntityId != selectedEntity.EntityId)
-                {
-                    bool hasHealth = selectedEntity.WatchedAttributes.HasAttribute("health");
-                    _api.Logger.VerboseDebug(
-                        $"[extraoverlaysm4] Selected entity code={selectedEntity.Code} id={selectedEntity.EntityId} hasHealth={hasHealth}");
-                    _lastSelectedEntityId = selectedEntity.EntityId;
-                }
-            }
+            _healthBarRenderer.Active = true;
         }
 
         public override string PropertyName() => "extraoverlay";

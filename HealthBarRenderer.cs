@@ -10,6 +10,13 @@ namespace ExtraOverlays
 {
     public class HealthBarRenderer : IRenderer, IDisposable
     {
+        private enum RenderAttemptResult
+        {
+            Drawn,
+            InvalidHealth,
+            BehindCamera
+        }
+
         private readonly ICoreClientAPI _api;
         private readonly HealthBarRenderConfig _config;
         private readonly Matrixf _mvMatrix = new();
@@ -20,9 +27,6 @@ namespace ExtraOverlays
         private string _lastRenderState = "init";
         private long _nextRenderSampleMs;
         private readonly List<(Entity Entity, double DistSq)> _nearbyEntities = new();
-        private const int MaxVisibleEntities = 15;
-        private const double MaxDistanceBlocks = 10;
-        private const double MaxDistanceSq = MaxDistanceBlocks * MaxDistanceBlocks;
         private long _nextDiagnosticLogMs;
 
         public bool Active { get; set; }
@@ -60,10 +64,13 @@ namespace ExtraOverlays
             _nearbyEntities.Clear();
             int scannedEntities = 0;
             int healthEntities = 0;
+            float maxDistanceBlocks = _config.MaxDistanceBlocks;
+            double maxDistanceSq = maxDistanceBlocks * maxDistanceBlocks;
+            int maxVisibleEntities = _config.MaxVisibleEntities;
             _api.World.GetEntitiesAround(
                 new Vec3d(playerEntity.Pos.X, playerEntity.Pos.Y, playerEntity.Pos.Z),
-                (float)MaxDistanceBlocks,
-                (float)MaxDistanceBlocks,
+                maxDistanceBlocks,
+                maxDistanceBlocks,
                 entity =>
                 {
                     scannedEntities++;
@@ -75,7 +82,7 @@ namespace ExtraOverlays
                     double dy = entity.Pos.Y - playerEntity.Pos.Y;
                     double dz = entity.Pos.Z - playerEntity.Pos.Z;
                     double distSq = dx * dx + dy * dy + dz * dz;
-                    if (distSq > MaxDistanceSq) return false;
+                    if (distSq > maxDistanceSq) return false;
 
                     _nearbyEntities.Add((entity, distSq));
                     return false;
@@ -84,14 +91,14 @@ namespace ExtraOverlays
             if (scannedEntities == 0)
             {
                 UpdateRenderState("no-entities-in-range-query");
-                MaybeLogDiagnostics(scannedEntities, healthEntities, 0);
+                MaybeLogDiagnostics(scannedEntities, healthEntities, 0, 0, 0, 0, maxDistanceBlocks, maxVisibleEntities);
                 return;
             }
 
             if (_nearbyEntities.Count == 0)
             {
                 UpdateRenderState("no-nearby-health-entities");
-                MaybeLogDiagnostics(scannedEntities, healthEntities, 0);
+                MaybeLogDiagnostics(scannedEntities, healthEntities, 0, 0, 0, 0, maxDistanceBlocks, maxVisibleEntities);
                 return;
             }
 
@@ -99,25 +106,39 @@ namespace ExtraOverlays
 
             float deltaAlpha = deltaTime / (Active ? _config.FadeIn : -_config.FadeOut);
             _alpha = Math.Max(0f, Math.Min(1f, _alpha + deltaAlpha));
-            int renderCount = Math.Min(MaxVisibleEntities, _nearbyEntities.Count);
+            int renderCount = Math.Min(maxVisibleEntities, _nearbyEntities.Count);
+            int drawnCount = 0;
+            int behindCameraCount = 0;
+            int invalidHealthCount = 0;
 
             for (int i = 0; i < renderCount; i++)
             {
-                RenderHealthBar(_nearbyEntities[i].Entity);
+                RenderAttemptResult result = RenderHealthBar(_nearbyEntities[i].Entity);
+                if (result == RenderAttemptResult.Drawn) drawnCount++;
+                if (result == RenderAttemptResult.BehindCamera) behindCameraCount++;
+                if (result == RenderAttemptResult.InvalidHealth) invalidHealthCount++;
             }
 
             UpdateRenderState($"rendering-multi:count={renderCount}");
-            MaybeLogDiagnostics(scannedEntities, healthEntities, renderCount);
+            MaybeLogDiagnostics(
+                scannedEntities,
+                healthEntities,
+                renderCount,
+                drawnCount,
+                behindCameraCount,
+                invalidHealthCount,
+                maxDistanceBlocks,
+                maxVisibleEntities);
         }
 
-        private void RenderHealthBar(Entity entity)
+        private RenderAttemptResult RenderHealthBar(Entity entity)
         {
             ITreeAttribute healthTree = entity.WatchedAttributes.GetTreeAttribute("health");
             float currentHealth = healthTree.GetFloat("currenthealth");
             float maxHealth = healthTree.GetFloat("maxhealth");
             if (maxHealth <= 0)
             {
-                return;
+                return RenderAttemptResult.InvalidHealth;
             }
 
             float progress = currentHealth / maxHealth;
@@ -149,7 +170,7 @@ namespace ExtraOverlays
             // Z negative seems to indicate that the name tag is behind us \o/
             if (pos.Z < 0)
             {
-                return;
+                return RenderAttemptResult.BehindCamera;
             }
 
             float scale = 4f / Math.Max(1, (float)pos.Z);
@@ -190,6 +211,7 @@ namespace ExtraOverlays
             shader.UniformMatrix("modelViewMatrix", _mvMatrix.Values);
 
             _api.Render.RenderMesh(_healthBarRef);
+            return RenderAttemptResult.Drawn;
         }
 
         private void GetHealthBarColor(float progress, ref Vec4f color)
@@ -239,7 +261,15 @@ namespace ExtraOverlays
             }
         }
 
-        private void MaybeLogDiagnostics(int scannedEntities, int healthEntities, int renderedEntities)
+        private void MaybeLogDiagnostics(
+            int scannedEntities,
+            int healthEntities,
+            int selectedToRender,
+            int drawnEntities,
+            int behindCameraCount,
+            int invalidHealthCount,
+            float maxDistanceBlocks,
+            int maxVisibleEntities)
         {
             if (_api.ElapsedMilliseconds < _nextDiagnosticLogMs)
             {
@@ -247,7 +277,7 @@ namespace ExtraOverlays
             }
 
             _api.Logger.Notification(
-                $"[extraoverlaysm4] Diagnostics range={MaxDistanceBlocks} scanned={scannedEntities} withHealth={healthEntities} renderable={_nearbyEntities.Count} rendered={renderedEntities}");
+                $"[extraoverlaysm4] Diagnostics range={maxDistanceBlocks} maxVisible={maxVisibleEntities} scanned={scannedEntities} withHealth={healthEntities} renderable={_nearbyEntities.Count} selected={selectedToRender} drawn={drawnEntities} behindCamera={behindCameraCount} invalidHealth={invalidHealthCount} alpha={_alpha:0.00}");
             _nextDiagnosticLogMs = _api.ElapsedMilliseconds + 5000;
         }
     }

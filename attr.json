@@ -1,0 +1,14 @@
+{
+  "FadeIn": 0.2,
+  "FadeOut": 0.4,
+  "Width": 100.0,
+  "Height": 10.0,
+  "YOffset": 10.0,
+  "HighHPColor": "#7FBF7F",
+  "MidHPColor": "#BFBF7F",
+  "LowHPColor": "#BF7F7F",
+  "LowHPThreshold": 0.25,
+  "MidHPThreshold": 0.5,
+  "MaxVisibleEntities": 15,
+  "MaxDistanceBlocks": 10.0
+}

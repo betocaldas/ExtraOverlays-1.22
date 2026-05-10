@@ -2,18 +2,21 @@ namespace ExtraOverlays
 {
     public class HealthBarRenderConfig
     {
-        public float FadeIn { get; set; } = 0.2f;
-        public float FadeOut { get; set; } = 0.4f;
+        public float FadeIn { get; set; }
+        public float FadeOut { get; set; }
 
-        public float Width { get; set; } = 100;
-        public float Height { get; set; } = 10;
-        public float YOffset { get; set; } = 10;
+        public float Width { get; set; }
+        public float Height { get; set; }
+        public float YOffset { get; set; }
 
-        public string HighHPColor { get; set; } = "#7FBF7F";
-        public string MidHPColor { get; set; } = "#BFBF7F";
-        public string LowHPColor { get; set; } = "#BF7F7F";
+        public string HighHPColor { get; set; } = string.Empty;
+        public string MidHPColor { get; set; } = string.Empty;
+        public string LowHPColor { get; set; } = string.Empty;
 
-        public float LowHPThreshold { get; set; } = 0.25f;
-        public float MidHPThreshold { get; set; } = 0.5f;
+        public float LowHPThreshold { get; set; }
+        public float MidHPThreshold { get; set; }
+
+        public int MaxVisibleEntities { get; set; }
+        public float MaxDistanceBlocks { get; set; }
     }
 }

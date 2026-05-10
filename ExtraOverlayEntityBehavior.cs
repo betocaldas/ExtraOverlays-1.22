@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Reflection;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common.Entities;
 
@@ -14,99 +15,64 @@ namespace ExtraOverlays
         public ExtraOverlayEntityBehavior(Entity entity) : base(entity)
         {
             _api = (ICoreClientAPI)entity.Api;
-            var config = LoadConfigWithLegacySupport();
-            _api.StoreModConfig(config, "extraoverlays.json");
+            var config = LoadConfigFromAttrFile();
             _healthBarRenderer = new HealthBarRenderer(_api, config);
             _api.Logger.Notification(
-                $"[extraoverlaysm4] Config loaded fadeIn={config.FadeIn} fadeOut={config.FadeOut} width={config.Width} height={config.Height} yOffset={config.YOffset}");
+                $"[extraoverlaysm4] attr.json loaded fadeIn={config.FadeIn} fadeOut={config.FadeOut} width={config.Width} height={config.Height} yOffset={config.YOffset} maxVisible={config.MaxVisibleEntities} maxDistance={config.MaxDistanceBlocks}");
         }
 
-        private HealthBarRenderConfig LoadConfigWithLegacySupport()
+        private HealthBarRenderConfig LoadConfigFromAttrFile()
         {
             try
             {
-                return _api.LoadModConfig<HealthBarRenderConfig>("extraoverlays.json") ?? new HealthBarRenderConfig();
+                string assemblyPath = Assembly.GetExecutingAssembly().Location;
+                string? assemblyDir = Path.GetDirectoryName(assemblyPath);
+                if (string.IsNullOrWhiteSpace(assemblyDir))
+                {
+                    _api.Logger.Error("[extraoverlaysm4] Could not resolve assembly directory, using fallback attr values");
+                    return CreateFallbackConfig();
+                }
+
+                string attrPath = Path.Combine(assemblyDir, "attr.json");
+                if (!File.Exists(attrPath))
+                {
+                    _api.Logger.Error($"[extraoverlaysm4] attr.json not found at {attrPath}, using fallback attr values");
+                    return CreateFallbackConfig();
+                }
+
+                var config = JsonSerializer.Deserialize<HealthBarRenderConfig>(File.ReadAllText(attrPath));
+                if (config == null)
+                {
+                    _api.Logger.Error("[extraoverlaysm4] attr.json is invalid, using fallback attr values");
+                    return CreateFallbackConfig();
+                }
+
+                return config;
             }
             catch (Exception e)
             {
-                _api.Logger.Warning($"[extraoverlaysm4] Failed to load modern config format, trying legacy format: {e.Message}");
-                return LoadLegacyConfig();
+                _api.Logger.Error($"[extraoverlaysm4] Failed to load attr.json: {e.Message}");
+                return CreateFallbackConfig();
             }
         }
 
-        private HealthBarRenderConfig LoadLegacyConfig()
+        private static HealthBarRenderConfig CreateFallbackConfig()
         {
-            try
+            return new HealthBarRenderConfig
             {
-                var config = new HealthBarRenderConfig();
-                var filePath = Path.Combine(_api.GetOrCreateDataPath("ModConfig"), "extraoverlays.json");
-
-                if (!File.Exists(filePath))
-                {
-                    _api.Logger.Warning("[extraoverlaysm4] No config file found, using defaults");
-                    return config;
-                }
-
-                using var document = JsonDocument.Parse(File.ReadAllText(filePath));
-                var root = document.RootElement;
-                config.FadeIn = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.FadeIn), config.FadeIn);
-                config.FadeOut = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.FadeOut), config.FadeOut);
-                config.Width = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.Width), config.Width);
-                config.Height = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.Height), config.Height);
-                config.YOffset = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.YOffset), config.YOffset);
-                config.HighHPColor = ReadLegacyString(root, nameof(HealthBarRenderConfig.HighHPColor), config.HighHPColor);
-                config.MidHPColor = ReadLegacyString(root, nameof(HealthBarRenderConfig.MidHPColor), config.MidHPColor);
-                config.LowHPColor = ReadLegacyString(root, nameof(HealthBarRenderConfig.LowHPColor), config.LowHPColor);
-                config.LowHPThreshold = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.LowHPThreshold), config.LowHPThreshold);
-                config.MidHPThreshold = ReadLegacyFloat(root, nameof(HealthBarRenderConfig.MidHPThreshold), config.MidHPThreshold);
-                _api.Logger.Notification("[extraoverlaysm4] Legacy config converted successfully");
-                return config;
-            }
-            catch
-            {
-                _api.Logger.Error("[extraoverlaysm4] Legacy config conversion failed, using defaults");
-                return new HealthBarRenderConfig();
-            }
-        }
-
-        private static float ReadLegacyFloat(JsonElement root, string key, float fallback)
-        {
-            if (!root.TryGetProperty(key, out var token))
-            {
-                return fallback;
-            }
-
-            if (token.ValueKind == JsonValueKind.Object && token.TryGetProperty("Value", out var valueToken))
-            {
-                return valueToken.GetSingle();
-            }
-
-            if (token.ValueKind == JsonValueKind.Number)
-            {
-                return token.GetSingle();
-            }
-
-            return fallback;
-        }
-
-        private static string ReadLegacyString(JsonElement root, string key, string fallback)
-        {
-            if (!root.TryGetProperty(key, out var token))
-            {
-                return fallback;
-            }
-
-            if (token.ValueKind == JsonValueKind.Object && token.TryGetProperty("Value", out var valueToken))
-            {
-                return valueToken.GetString() ?? fallback;
-            }
-
-            if (token.ValueKind == JsonValueKind.String)
-            {
-                return token.GetString() ?? fallback;
-            }
-
-            return fallback;
+                FadeIn = 0.2f,
+                FadeOut = 0.4f,
+                Width = 100f,
+                Height = 10f,
+                YOffset = 10f,
+                HighHPColor = "#7FBF7F",
+                MidHPColor = "#BFBF7F",
+                LowHPColor = "#BF7F7F",
+                LowHPThreshold = 0.25f,
+                MidHPThreshold = 0.5f,
+                MaxVisibleEntities = 15,
+                MaxDistanceBlocks = 10f
+            };
         }
 
         public override void OnGameTick(float dt)

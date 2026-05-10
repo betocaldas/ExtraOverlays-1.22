@@ -24,6 +24,12 @@
 		</Reference>
 	</ItemGroup>
 
+	<ItemGroup>
+		<None Include="attr.json">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
 	<PropertyGroup>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<OutputPath>bin\</OutputPath>

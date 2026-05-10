@@ -1,3 +1,4 @@
+using System;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common.Entities;
 
@@ -11,7 +12,18 @@ namespace ExtraOverlays
         public ExtraOverlayEntityBehavior(Entity entity) : base(entity)
         {
             _api = (ICoreClientAPI)entity.Api;
-            var config = _api.LoadModConfig<HealthBarRenderConfig>("extraoverlays.json") ?? new HealthBarRenderConfig();
+
+            HealthBarRenderConfig? config = null;
+            try
+            {
+                config = _api.LoadModConfig<HealthBarRenderConfig>("extraoverlays.json");
+            }
+            catch (Exception ex)
+            {
+                _api.Logger.Warning("[extraoverlaysm4] Could not read extraoverlays.json ({0}); resetting to defaults.", ex.Message);
+            }
+
+            config ??= new HealthBarRenderConfig();
             _api.StoreModConfig(config, "extraoverlays.json");
             _healthBarRenderer = new HealthBarRenderer(_api, config);
         }

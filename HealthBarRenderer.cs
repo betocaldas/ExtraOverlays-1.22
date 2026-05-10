@@ -15,6 +15,8 @@ namespace ExtraOverlays
         private readonly MeshRef? _backRef;
         private Vec4f _color = new();
         private float _alpha = 0f;
+        private string _lastRenderState = "init";
+        private long _nextRenderSampleMs;
 
         public Entity? ForEntity { get; set; }
         public bool Active { get; set; }
@@ -39,24 +41,33 @@ namespace ExtraOverlays
             // no entity
             if (ForEntity == null)
             {
+                UpdateRenderState("no-entity");
                 return;
             }
 
             // no health
             if (!ForEntity.WatchedAttributes.HasAttribute("health"))
             {
+                UpdateRenderState($"no-health:{ForEntity.Code}");
                 return;
             }
 
             // invisible
             if (_alpha <= 0 && !Active)
             {
+                UpdateRenderState("hidden-alpha");
                 return;
             }
 
             ITreeAttribute healthTree = ForEntity.WatchedAttributes.GetTreeAttribute("health");
             float currentHealth = healthTree.GetFloat("currenthealth");
             float maxHealth = healthTree.GetFloat("maxhealth");
+            if (maxHealth <= 0)
+            {
+                UpdateRenderState($"invalid-health:{ForEntity.Code}:max={maxHealth}");
+                return;
+            }
+
             float progress = currentHealth / maxHealth;
 
             float deltaAlpha = deltaTime / (Active ? _config.FadeIn : -_config.FadeOut);
@@ -89,6 +100,7 @@ namespace ExtraOverlays
             // Z negative seems to indicate that the name tag is behind us \o/
             if (pos.Z < 0)
             {
+                UpdateRenderState("behind-camera");
                 return;
             }
 
@@ -130,6 +142,7 @@ namespace ExtraOverlays
             shader.UniformMatrix("modelViewMatrix", _mvMatrix.Values);
 
             _api.Render.RenderMesh(_healthBarRef);
+            UpdateRenderState($"rendering:{ForEntity.Code}:hp={currentHealth}/{maxHealth}:alpha={_alpha:0.00}");
         }
 
         private void GetHealthBarColor(float progress, ref Vec4f color)
@@ -160,6 +173,23 @@ namespace ExtraOverlays
             _api.Render.DeleteMesh(_backRef);
             _api.Render.DeleteMesh(_healthBarRef);
             _api.Event.UnregisterRenderer(this, EnumRenderStage.Ortho);
+        }
+
+        private void UpdateRenderState(string nextState)
+        {
+            if (_lastRenderState != nextState)
+            {
+                _lastRenderState = nextState;
+                _api.Logger.VerboseDebug($"[extraoverlaysm4] Render state: {nextState}");
+                _nextRenderSampleMs = _api.ElapsedMilliseconds + 10000;
+                return;
+            }
+
+            if (_api.ElapsedMilliseconds >= _nextRenderSampleMs)
+            {
+                _api.Logger.VerboseDebug($"[extraoverlaysm4] Render state sample: {nextState}");
+                _nextRenderSampleMs = _api.ElapsedMilliseconds + 10000;
+            }
         }
     }
 }

@@ -133,7 +133,12 @@ namespace ExtraOverlays
 
         private RenderAttemptResult RenderHealthBar(Entity entity)
         {
-            ITreeAttribute healthTree = entity.WatchedAttributes.GetTreeAttribute("health");
+            ITreeAttribute? healthTree = entity.WatchedAttributes.GetTreeAttribute("health");
+            if (healthTree == null)
+            {
+                return RenderAttemptResult.InvalidHealth;
+            }
+
             float currentHealth = healthTree.GetFloat("currenthealth");
             float maxHealth = healthTree.GetFloat("maxhealth");
             if (maxHealth <= 0)
@@ -276,7 +281,7 @@ namespace ExtraOverlays
                 return;
             }
 
-            _api.Logger.Notification(
+            _api.Logger.VerboseDebug(
                 $"[extraoverlaysm4] Diagnostics range={maxDistanceBlocks} maxVisible={maxVisibleEntities} scanned={scannedEntities} withHealth={healthEntities} renderable={_nearbyEntities.Count} selected={selectedToRender} drawn={drawnEntities} behindCamera={behindCameraCount} invalidHealth={invalidHealthCount} alpha={_alpha:0.00}");
             _nextDiagnosticLogMs = _api.ElapsedMilliseconds + 5000;
         }
